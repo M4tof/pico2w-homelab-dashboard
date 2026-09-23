@@ -1,0 +1,18 @@
+# Build directories
+build/
+bin/
+*.uf2
+*.elf
+*.bin
+*.hex
+*.map
+
+# IDE Specifics (VS Code / CLion)
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Credentials (Crucial!)
+src/secrets.h
+secrets.h
