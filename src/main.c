@@ -6,6 +6,7 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "secrets.h"
+#include "lcd.h"
 
 // Forward declaration of our API server starter
 void start_api_server(void);
@@ -30,6 +31,11 @@ void vNetworkTask(void *pvParameters) {
             if (netif_list != NULL) {
                 char *ip_str = ip4addr_ntoa(netif_ip4_addr(netif_list));
                 printf("[NetTask] Assigned IP Address: %s\n", ip_str ? ip_str : "0.0.0.0");
+
+                char ip_display_buf[17];
+                snprintf(ip_display_buf, sizeof(ip_display_buf), "IP: %s", ip_str);
+                lcd_set_cursor(1, 0);
+                lcd_string(ip_display_buf);
             }
             
             // START THE API SERVER ONCE CONNECTED
@@ -49,6 +55,14 @@ int main() {
     sleep_ms(2000); 
     
     printf("Starting Firmware Version: %s\n", FIRMWARE_VERSION);
+
+    lcd_init(i2c0, 0x27, 2, 16);
+    lcd_set_cursor(0, 0);
+    lcd_string("Pico 2 W Online!");
+    lcd_set_cursor(1, 0);
+    lcd_string("IP: Connecting..");
+
+    printf("LCD Initialized. Starting Network Task...\n");
 
     // Launch Network Task
     xTaskCreate(vNetworkTask, "NetTask", 1024, NULL, 2, NULL);
