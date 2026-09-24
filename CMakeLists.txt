@@ -24,6 +24,7 @@ add_executable(pico_dashboard
     src/api_server.c
     lib/lcd/lcd.c
     lib/cJSON/cJSON.c
+    lib/mqtt/mqtt_client.c
 )
 
 # 6. Enable USB Serial output
@@ -37,6 +38,7 @@ target_include_directories(pico_dashboard PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src
     ${CMAKE_CURRENT_LIST_DIR}/lib/cJSON
     ${CMAKE_CURRENT_LIST_DIR}/lib/lcd
+    ${CMAKE_CURRENT_LIST_DIR}/lib/mqtt
     ${CMAKE_CURRENT_LIST_DIR}
     ${FREERTOS_KERNEL_PATH}/include
     ${FREERTOS_KERNEL_PATH}/portable/ThirdParty/Community-Supported-Ports/GCC/RP2350_ARM_NTZ/non_secure
@@ -48,6 +50,7 @@ target_include_directories(pico_dashboard PRIVATE
 target_link_libraries(pico_dashboard PRIVATE 
     pico_stdlib 
     pico_cyw43_arch_lwip_sys_freertos
+    pico_lwip_mqtt
     FreeRTOS-Kernel
     FreeRTOS-Kernel-Heap4
     hardware_i2c

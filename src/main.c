@@ -6,12 +6,12 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "secrets.h"
+#include "cJSON.h"
 #include "lcd.h"
+#include "mqtt_client.h" // <--- Include our MQTT module
 
-// Forward declaration of our API server starter
 void start_api_server(void);
 
-// Network Connection Task
 void vNetworkTask(void *pvParameters) {
     printf("[NetTask] Initializing Wi-Fi hardware...\n");
     
@@ -31,15 +31,16 @@ void vNetworkTask(void *pvParameters) {
             if (netif_list != NULL) {
                 char *ip_str = ip4addr_ntoa(netif_ip4_addr(netif_list));
                 printf("[NetTask] Assigned IP Address: %s\n", ip_str ? ip_str : "0.0.0.0");
-
-                char ip_display_buf[17];
-                snprintf(ip_display_buf, sizeof(ip_display_buf), "IP: %s", ip_str);
+                
+                char lcd_buf[17];
+                snprintf(lcd_buf, sizeof(lcd_buf), "IP:%s", ip_str);
                 lcd_set_cursor(1, 0);
-                lcd_string(ip_display_buf);
+                lcd_string(lcd_buf);
             }
             
-            // START THE API SERVER ONCE CONNECTED
+            // Start Services
             start_api_server();
+            start_mqtt_client(MQTT_BROKER_IP, 1883); // <--- START MQTT CLIENT HERE
             break; 
         } else {
             printf("[NetTask] Connection failed. Retrying in 5s...\n");
@@ -50,27 +51,35 @@ void vNetworkTask(void *pvParameters) {
     vTaskDelete(NULL);
 }
 
+// Example task showing how to publish JSON over MQTT continuously
+void vHeartbeatTask(void *pvParameters) {
+    while (true) {
+        if (is_mqtt_connected()) {
+            cJSON *root = cJSON_CreateObject();
+            cJSON_AddStringToObject(root, "status", "online");
+            char *json_str = cJSON_Print(root);
+            
+            if (json_str) {
+                mqtt_publish_message("pico/status", json_str);
+                free(json_str);
+            }
+            cJSON_Delete(root);
+        }
+        vTaskDelay(pdMS_TO_TICKS(10000)); // Every 10 seconds
+    }
+}
+
 int main() {
     stdio_init_all();
     sleep_ms(2000); 
     
-    printf("Starting Firmware Version: %s\n", FIRMWARE_VERSION);
-
     lcd_init(i2c0, 0x27, 2, 16);
     lcd_set_cursor(0, 0);
-    lcd_string("Pico 2 W Online!");
-    lcd_set_cursor(1, 0);
-    lcd_string("IP: Connecting..");
+    lcd_string("Dashboard Booting");
 
-    printf("LCD Initialized. Starting Network Task...\n");
-
-    // Launch Network Task
     xTaskCreate(vNetworkTask, "NetTask", 1024, NULL, 2, NULL);
+    xTaskCreate(vHeartbeatTask, "HeartbeatTask", 1024, NULL, 1, NULL);
 
-    // Start FreeRTOS Scheduler
     vTaskStartScheduler();
-
-    while (true) {
-        tight_loop_contents();
-    }
+    while (true);
 }
