@@ -11,7 +11,7 @@ project(pico_dashboard C CXX ASM)
 
 # Define versioning here
 add_compile_options(-DNO_SYS=0)
-add_definitions(-DFIRMWARE_VERSION="0,0.1")
+add_definitions(-DFIRMWARE_VERSION="2.0.1")
 
 # 4. Initialize SDK
 pico_sdk_init()
@@ -25,6 +25,8 @@ add_executable(pico_dashboard
     lib/lcd/lcd.c
     lib/cJSON/cJSON.c
     lib/mqtt/mqtt_client.c
+    lib/light/light_read.c
+    lib/display/display_driver.c
 )
 
 # 6. Enable USB Serial output
@@ -39,6 +41,8 @@ target_include_directories(pico_dashboard PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/lib/cJSON
     ${CMAKE_CURRENT_LIST_DIR}/lib/lcd
     ${CMAKE_CURRENT_LIST_DIR}/lib/mqtt
+    ${CMAKE_CURRENT_LIST_DIR}/lib/display
+    ${CMAKE_CURRENT_LIST_DIR}/lib/light
     ${CMAKE_CURRENT_LIST_DIR}
     ${FREERTOS_KERNEL_PATH}/include
     ${FREERTOS_KERNEL_PATH}/portable/ThirdParty/Community-Supported-Ports/GCC/RP2350_ARM_NTZ/non_secure
@@ -54,6 +58,7 @@ target_link_libraries(pico_dashboard PRIVATE
     FreeRTOS-Kernel
     FreeRTOS-Kernel-Heap4
     hardware_i2c
+    hardware_adc 
 )
 
 # 9. Generate .uf2 file (DO NOT MODIFY)

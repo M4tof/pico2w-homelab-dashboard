@@ -5,71 +5,16 @@
 #include "pico/cyw43_arch.h"
 #include "lwip/ip4_addr.h"
 #include "lwip/netif.h"
-#include "hardware/gpio.h"
 #include "FreeRTOS.h"
 #include "task.h"
+#include "hardware/adc.h"
 #include "semphr.h"
 #include "secrets.h"
 #include "cJSON.h"
-#include "pinout.h"
+#include "lcd.h"
 #include "mqtt_client.h"
-
-// -------------- Global variables for 7-segment display --------------
-int displayNumbers[4] = {0, 0, 0, 0}; 
-static SemaphoreHandle_t displayMutex = NULL;
-
-const bool NUM_TIME_DISPLAY_MAP[11][7] = { 
-  {1, 1, 1, 1, 1, 1, 0}, {0, 1, 1, 0, 0, 0, 0}, {1, 1, 0, 1, 1, 0, 1},
-  {1, 1, 1, 1, 0, 0, 1}, {0, 1, 1, 0, 0, 1, 1}, {1, 0, 1, 1, 0, 1, 1},
-  {1, 0, 1, 1, 1, 1, 1}, {1, 1, 1, 0, 0, 0, 0}, {1, 1, 1, 1, 1, 1, 1},
-  {1, 1, 1, 1, 0, 1, 1}, {0, 0, 0, 0, 0, 0, 0}
-}; 
-
-int local_hh = 0;
-int local_mm = 0;
-
-void updateDisplayNumbers(void) {
-    displayNumbers[0] = local_hh / 10;
-    displayNumbers[1] = local_hh % 10;
-    displayNumbers[2] = local_mm / 10;
-    displayNumbers[3] = local_mm % 10;
-}
-
-// Hardware initialization for 7-segment display pins
-void setup_display_pins(void) {
-    for (int i = 0; i < 7; i++) {
-        gpio_init(SEGS[i]);
-        gpio_set_dir(SEGS[i], GPIO_OUT);
-    }
-    for (int i = 0; i < 4; i++) {
-        gpio_init(DIGITS[i]);
-        gpio_set_dir(DIGITS[i], GPIO_OUT);
-        gpio_put(DIGITS[i], 0);
-    }
-    gpio_init(SEG_DP);
-    gpio_set_dir(SEG_DP, GPIO_OUT);
-    gpio_put(SEG_DP, 1);
-}
-
-// Multiplex a single digit
-void showDigit(int num, int pos) {
-    // Turn off all digits first (prevent ghosting)
-    for (int i = 0; i < 4; i++) {
-        gpio_put(DIGITS[i], 0);
-    }
-    
-    // Set segments for the specific number
-    for (int s = 0; s < 7; s++) {
-        bool segment_state = NUM_TIME_DISPLAY_MAP[num][s];
-        gpio_put(SEGS[s], segment_state ? 0 : 1); 
-    }
-    
-    // Handle Decimal Point (between HH and MM at pos 1)
-    gpio_put(SEG_DP, (pos == 1) ? 0 : 1); 
-    
-    // Turn on the specific digit
-    gpio_put(DIGITS[pos], 1); 
-}
+#include "display_driver.h" 
+#include "light_read.h"
 
 // Handle incoming messages from MQTT
 void handle_incoming_mqtt(const char *topic, const char *payload, uint16_t len) {
@@ -111,25 +56,6 @@ void vUpdateFromMQTTTask(void *pvParameters) {
     }
 }
 
-// High-speed multiplexing task pinned to Core 1
-void vTimeDisplayTask(void *pvParameters) {
-    int local_copy[4];
-    
-    while (true) {
-        if (xSemaphoreTake(displayMutex, pdMS_TO_TICKS(5)) == pdTRUE) {
-            for(int i = 0; i < 4; i++) {
-                local_copy[i] = displayNumbers[i];
-            }
-            xSemaphoreGive(displayMutex);
-        }
-
-        for (int i = 0; i < 4; i++) {
-            showDigit(local_copy[i], i);
-            vTaskDelay(pdMS_TO_TICKS(2)); 
-        }
-    }
-}
-
 void vNetworkTask(void *pvParameters) {
     if (cyw43_arch_init()) {
         vTaskDelete(NULL);
@@ -139,7 +65,6 @@ void vNetworkTask(void *pvParameters) {
     while (true) {
         if (cyw43_arch_wifi_connect_timeout_ms(WIFI_SSID, WIFI_PASSWORD, CYW43_AUTH_WPA2_AES_PSK, 15000) == 0) {
             printf("[NetTask] Connected to Wi-Fi successfully!\n");
-            // Fixed argument count to match start_mqtt_client signature (broker_ip, port, callback)
             start_mqtt_client(MQTT_BROKER_IP, 1883, handle_incoming_mqtt);
             break;
         }
@@ -152,20 +77,40 @@ void vNetworkTask(void *pvParameters) {
     vTaskDelete(NULL);
 }
 
+void vLightReadingTask(void *pvParameters) {
+    while (true) {
+        checkLocalLight();
+        printf("[Light] Current light level: %d\n", currentLightLevel);
+        vTaskDelay(pdMS_TO_TICKS(1000)); 
+    }
+}
+
 int main() {
     stdio_init_all();
     sleep_ms(2000);
 
     printf("[Main] Initializing hardware pins...\n");
     displayMutex = xSemaphoreCreateMutex();
+    lightMutex = xSemaphoreCreateMutex();
+
     setup_display_pins();
+    
+    adc_init(); 
+    adc_gpio_init(PHOTO_RES_PIN);
+    adc_select_input(PHOTO_RES_PIN - 26); // Adjust for ADC input mapping
+
+    lcd_init(i2c0, 0x27, 2, 16);
+    lcd_set_cursor(0, 0);
+    lcd_string("Dashboard Booting");
 
     printf("[Main] Initializing software components...\n");
     TaskHandle_t displayTaskHandle = NULL;
     
-    xTaskCreate(vNetworkTask, "NetTask", 1024, NULL, 2, NULL);
+    xTaskCreate(vNetworkTask, "NetTask", 1024, NULL, 9, NULL);
     xTaskCreate(vUpdateFromMQTTTask, "MQTTSubTask", 1024, NULL, 1, NULL);
-    xTaskCreate(vTimeDisplayTask, "TimeDisplayTask", 512, NULL, 3, &displayTaskHandle);
+    
+    xTaskCreate(vTimeDisplayTask, "TimeDisplayTask", 512, NULL, 10, &displayTaskHandle);
+    xTaskCreate(vLightReadingTask, "LightReadTask", 512, NULL, 1, NULL);
 
 #if configUSE_CORE_AFFINITY && configNUMBER_OF_CORES > 1
     vTaskCoreAffinitySet(displayTaskHandle, 2); // Core 1 binary mask
