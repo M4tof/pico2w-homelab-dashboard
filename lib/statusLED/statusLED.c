@@ -13,10 +13,10 @@ const int ColorPresets[COLOR_PRESET_NUM][3] = {
     {255, 0, 0},      // 1: Red [CRITICAL]
     {0, 255, 0},      // 2: Green [OK]
     {0, 0, 255},      // 3: Blue [Warning]
-    {255, 55, 0},     // 4: Yellow [Unknown||Hour]
-    {255, 50, 30},    // 5: White [FirstBoot]
-    {0, 255, 80},     // 6: Teal [TBD]
-    {255, 0, 50}      // 7: Magenta [TBD]
+    {255, 125, 0},     // 4: Yellow [Unknown||Hour]
+    {255, 125, 80},    // 5: White [FirstBoot]
+    {0, 255, 125},     // 6: Teal [Used as one half of the Router Down state, w/Red]
+    {255, 0, 125},       // 7: Magenta [TBD]
 };
 
 // Function to apply color to the RGB LED Physical pins using hardware PWM
@@ -64,14 +64,17 @@ void setRGB(int colorPreset) {
         printf("[StatusLED] Failed to acquire lightMutex, using last known light level\n");
     }
 
+    int maxlevel = 100;
+    int minlevel = 10;
+
     if (LightLevelCpy >= 500) {
-        brightnessPercent = 100;
+        brightnessPercent = maxlevel;
     } 
     else if (LightLevelCpy <= 40) {
-        brightnessPercent = 2;
+        brightnessPercent = minlevel;
     } 
     else {
-        brightnessPercent = map(LightLevelCpy, 40, 500, 2, 100);
+        brightnessPercent = map(LightLevelCpy, 40, 500, minlevel, maxlevel);
     }
 
     r = (r * brightnessPercent) / 100;
