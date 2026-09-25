@@ -1,8 +1,3 @@
-2.0.2:
-    - Add RGB LED
-    - rgb state based on mqtt
-    - make rgb and lcd fade based on light
-
 2.0.3:
     - lcd displays what it is given from mqtt
     - local display if no message in 30s
