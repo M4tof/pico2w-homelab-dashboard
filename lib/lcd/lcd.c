@@ -33,6 +33,8 @@ static int _rows;
 static int _cols;
 static uint8_t backlight_val = LCD_BACKLIGHT;
 
+SemaphoreHandle_t lcdMutex = NULL;
+
 static void i2c_write_byte(uint8_t val) {
     i2c_write_blocking(lcd_i2c, _addr, &val, 1, false);
 }

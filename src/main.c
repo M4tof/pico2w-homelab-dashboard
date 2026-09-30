@@ -8,6 +8,7 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "hardware/adc.h"
+#include "hardware/watchdog.h"
 #include "semphr.h"
 #include "secrets.h"
 #include "cJSON.h"
@@ -19,8 +20,7 @@
 #include "api_server.h"
 #include "network_watchdog.h"
 #include "misc.h"
- 
-int LIGHT_THRESHOLD = 100; // Default threshold for ambient light level
+
 SemaphoreHandle_t adcMutex;
 
 char currentCustomMsg[64] = "";
@@ -134,23 +134,23 @@ void vNetworkTask(void *pvParameters) {
 
 void vLightReadingTask(void *pvParameters) {
     int Readings = 0;
-    bool backlightState = true; // true = ON, false = OFF
+    bool backlightState = true; 
     bool previousBacklightState = backlightState;
 
     while (true) {
         checkLocalLight();
-        if (xSemaphoreTake(lightMutex, pdMS_TO_TICKS(5)) == pdTRUE) {
-            if (currentLightLevel < LIGHT_THRESHOLD) {
-                lcd_backlight(false);
-                backlightState = false;
-            }
-            else {
-                lcd_backlight(true);
-                backlightState = true;
-            }
-            xSemaphoreGive(lightMutex);
-        } else {
-            printf("[Light] Failed to acquire lightMutex for reading\n");
+        
+        if (currentLightLevel < LIGHT_THRESHOLD - 20) { 
+            backlightState = false;
+        }
+        else if (currentLightLevel > LIGHT_THRESHOLD + 40){ 
+            backlightState = true;
+        }
+
+        // Atomically control the LCD backlight safely via mutex
+        if (xSemaphoreTake(lcdMutex, portMAX_DELAY) == pdTRUE) {
+            lcd_backlight(backlightState);
+            xSemaphoreGive(lcdMutex);
         }
 
         if (backlightState != previousBacklightState) {
@@ -163,7 +163,7 @@ void vLightReadingTask(void *pvParameters) {
             printf("[Light] Current light level: %d\n", currentLightLevel);
         }
         
-        vTaskDelay(pdMS_TO_TICKS(500)); 
+        vTaskDelay(pdMS_TO_TICKS(1000)); 
     }
 }
 
@@ -171,25 +171,24 @@ void vStatusLEDTask(void *pvParameters) {
     int flash_toggle = 0;
     while (true) {
         if (currentHealthState == NET_HEALTH_OK) {
-            setRGB(currentLEDState); // Normal operation
+            setRGB(currentLEDState); 
         } 
         else if (connectedOnce && currentHealthState == NET_HEALTH_NO_MQTT) {
             currentLEDState = 3;
-            setRGB(3); //Blue for warning
+            setRGB(3); 
         } 
         else if (connectedOnce && currentHealthState == NET_HEALTH_SERVER_DOWN) {
             currentLEDState = 2;
-            setRGB(2); // Red for critical
+            setRGB(2); 
         } 
         else if (currentHealthState == NET_HEALTH_ROUTER_DOWN) {
-            // Alternate Red and Teal
             currentLEDState = 6;
-            if (flash_toggle) setRGB(2); // Red
-            else setRGB(6);             // Teal
+            if (flash_toggle) setRGB(2); 
+            else setRGB(6);             
             flash_toggle = !flash_toggle;
         }
 
-        vTaskDelay(pdMS_TO_TICKS(500)); 
+        vTaskDelay(pdMS_TO_TICKS(100)); 
     }
 }
 
@@ -197,16 +196,17 @@ void vLCDDisplayTask(void *pvParameters) {
     char currentLcdL1[17] = "Dis Bash's Bootin";
     char currentLcdL2[17] = "Please Wait...";
     const char MsgDelimiter = '|'; 
+    
+    const int restartEveryWriteNr = 10;
+    int writeNum = 0;
 
     while (true) {
         bool localDiagnostic = true;
         char customMsgCopy[64] = "";
 
-        // Check if we should show the custom MQTT message or fallback to diagnostics
         if (xSemaphoreTake(MQTT_MSG_MUTEX, pdMS_TO_TICKS(5)) == pdTRUE) {
             TickType_t currentTime = xTaskGetTickCount();
             
-            // Show custom message if we have a valid one AND it's been less than 10 seconds
             if (hasValidCustomMsg && (currentTime - lastMQTTMessageTime) < pdMS_TO_TICKS(10 * 1000)) {
                 localDiagnostic = false;
                 strncpy(customMsgCopy, currentCustomMsg, sizeof(customMsgCopy) - 1);
@@ -221,29 +221,21 @@ void vLCDDisplayTask(void *pvParameters) {
         }
 
         if (localDiagnostic) {
-            // 1. Get Light Level safely via Mutex
             int LightCpy = -1;
             int ledCpy = -1;
 
             if (xSemaphoreTake(lightMutex, pdMS_TO_TICKS(5)) == pdTRUE) {
                 LightCpy = currentLightLevel;
                 xSemaphoreGive(lightMutex);
-            } else {
-                printf("[LCD] Failed to acquire lightMutex for reading\n");
             }
             if (xSemaphoreTake(ALARM_LED_MUTEX, pdMS_TO_TICKS(5)) == pdTRUE) {
                 ledCpy = currentLEDState;
                 xSemaphoreGive(ALARM_LED_MUTEX);
-            } else {
-                printf("[LCD] Failed to acquire LED Mutex for reading\n");
             }
 
-            snprintf(currentLcdL1, sizeof(currentLcdL1), "Light:%-4d LED:%d", LightCpy,ledCpy);
+            snprintf(currentLcdL1, sizeof(currentLcdL1), "Light:%-4d LED:%d", LightCpy, ledCpy);
 
-            // 2. Get Internal Temperature
             float temp = readInternalTemperature();
-
-            // 3. Get Free RAM percentage (RP2350 has 520KB SRAM)
             uint32_t totalRAM = 520 * 1024;
             uint32_t freeRAM = getFreeHeap();
             int usedPercent = ((int)(totalRAM - freeRAM) * 100) / (int)totalRAM;
@@ -251,7 +243,6 @@ void vLCDDisplayTask(void *pvParameters) {
             snprintf(currentLcdL2, sizeof(currentLcdL2), "T:%.1fC RAM:%d%%", temp, usedPercent);
         } 
         else {
-            // Split custom message into two lines if it contains the delimiter '|'
             char *delimiterPos = strchr(customMsgCopy, MsgDelimiter);
             if (delimiterPos != NULL) {
                 size_t line1Length = delimiterPos - customMsgCopy;
@@ -268,17 +259,49 @@ void vLCDDisplayTask(void *pvParameters) {
             }
         }
         
-        // Clear and print to LCD using our C driver functions
-        lcd_clear();
-        lcd_set_cursor(0, 0); 
-        lcd_string(currentLcdL1);
-        lcd_set_cursor(1, 0); 
-        lcd_string(currentLcdL2);
+        // --- ABSOLUTELY ATOMIC LCD WRITE & RESET SECTION ---
+        if (xSemaphoreTake(lcdMutex, portMAX_DELAY) == pdTRUE) {
+            writeNum++;
+
+            // if (writeNum % restartEveryWriteNr == 0){
+            //     lcd_init(i2c0, 0x27, 2, 16);
+            //     printf("[LCD] Reset/Re-init LCD sequence executed\n");
+            // }
+
+            lcd_clear();
+            lcd_set_cursor(0, 0); 
+            lcd_string(currentLcdL1);
+            lcd_set_cursor(1, 0); 
+            lcd_string(currentLcdL2);
+
+            xSemaphoreGive(lcdMutex);
+        }
 
         vTaskDelay(pdMS_TO_TICKS(1000)); 
     }
 }
 
+void vCPUWatchdog(void *pvParameters) {
+    while (true) {
+        watchdog_update(); // Feed the hardware dog every 3 seconds
+        // printf("[CPUWatchdog] Fed hardware dog\n"); // Keep commented unless debugging
+        vTaskDelay(pdMS_TO_TICKS(3000)); 
+    }
+}
+
+void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName) {
+    printf("[CRITICAL] Stack overflow detected in task: %s\n", pcTaskName);
+    
+    // Flash all LEDs red rapidly or force an immediate hardware reset
+    // (Hardware watchdog will catch it if we force a spin, or we can reboot manually)
+    watchdog_reboot(0, 0, 0); 
+    while(1);
+}
+
+void vApplicationMallocFailedHook(void) {
+    printf("[CRITICAL] FreeRTOS Malloc Failed! Out of RAM!\n");
+    watchdog_reboot(0, 0, 0);
+}
 
 int main() {
     stdio_init_all();
@@ -290,6 +313,7 @@ int main() {
     ALARM_LED_MUTEX = xSemaphoreCreateMutex();
     adcMutex = xSemaphoreCreateMutex();
     MQTT_MSG_MUTEX = xSemaphoreCreateMutex();
+    lcdMutex = xSemaphoreCreateMutex();
 
     setup_display_pins();
     setup_led_pins();
@@ -308,27 +332,28 @@ int main() {
     TaskHandle_t networkTaskHandle = NULL;
     TaskHandle_t lcdTaskHandle = NULL;
     TaskHandle_t mqttSubTaskHandle = NULL;
+    TaskHandle_t lightSubTaskHandle = NULL;
+    TaskHandle_t watchdogSubTaskHandle = NULL;
 
     // ==========================================
     // CORE 1: REAL-TIME HARDWARE UI (Strictly Pinned)
     // ==========================================
     // These run continuously with high priority to ensure zero screen flicker.
     xTaskCreate(vTimeDisplayTask, "TimeDisplayTask", 512, NULL, 5, &displayTaskHandle);
-    xTaskCreate(vStatusLEDTask, "StatusLEDTask", 512, NULL, 4, &ledTaskHandle);
-    xTaskCreate(vLCDDisplayTask, "LCDTask", 1024, NULL, 3, &lcdTaskHandle);
+    xTaskCreate(vStatusLEDTask, "StatusLEDTask", 256, NULL, 4, &ledTaskHandle);
+    xTaskCreate(vLCDDisplayTask, "LCDTask", 2048, NULL, 3, &lcdTaskHandle);
 
     // ==========================================
     // CORE 0: NETWORK, MQTT & BACKGROUND SERVICES
     // ==========================================
-    // Network task handles connection setup, then exits (vTaskDelete).
     xTaskCreate(vNetworkTask, "NetTask", 1024, NULL, 4, &networkTaskHandle);
-    
-    // MQTT Sub loop runs quietly in the background, waking up every 10s to ensure subscription.
     xTaskCreate(vUpdateFromMQTTTask, "MQTTSubTask", 1024, NULL, 3, &mqttSubTaskHandle);
+    xTaskCreate(vLightReadingTask, "LightReadTask", 256, NULL, 2, &lightSubTaskHandle);
     
-    // Sensor poll runs low priority so it never impacts UI or network throughput.
-    xTaskCreate(vLightReadingTask, "LightReadTask", 512, NULL, 2, NULL);
+    // Proper background task for feeding the hardware watchdog
+    xTaskCreate(vCPUWatchdog, "CPUWatchdog", 256, NULL, 1, &watchdogSubTaskHandle);
 
+    // Start your network health monitor task
     start_network_watchdog();
 
 #if configUSE_CORE_AFFINITY && configNUMBER_OF_CORES > 1
@@ -337,12 +362,16 @@ int main() {
     vTaskCoreAffinitySet(ledTaskHandle, 2);     
     vTaskCoreAffinitySet(lcdTaskHandle, 2);
     
-    // Pin Core 0 tasks (MQTT loop, Light polling)
+    // Pin Core 0 tasks (MQTT loop, Light polling, Watchdog)
+    vTaskCoreAffinitySet(networkTaskHandle,1);
     vTaskCoreAffinitySet(mqttSubTaskHandle, 1);
+    vTaskCoreAffinitySet(lightSubTaskHandle, 1);
+    vTaskCoreAffinitySet(watchdogSubTaskHandle, 1);
 #endif
 
-    printf("[Main] Starting FreeRTOS Scheduler...\n");
+    watchdog_enable(8000, true);
     vTaskStartScheduler();
+    printf("[Main] Started FreeRTOS Scheduler:\n");
     
     while (true);
 }

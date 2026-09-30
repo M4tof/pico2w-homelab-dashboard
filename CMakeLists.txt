@@ -10,8 +10,9 @@ include(FreeRTOS_Kernel_import.cmake)
 project(pico_dashboard C CXX ASM)
 
 # Define versioning here
+set(FW_VERSION "2.0.6")
 add_compile_options(-DNO_SYS=0)
-add_definitions(-DFIRMWARE_VERSION="2.0.5")
+add_definitions(-DFIRMWARE_VERSION="${FW_VERSION}")
 
 # 4. Initialize SDK
 pico_sdk_init()
@@ -30,6 +31,11 @@ add_executable(pico_dashboard
     lib/display/display_driver.c
     lib/statusLED/statusLED.c
     lib/misc/misc.c
+)
+
+# Automatically rename the output file to include your firmware version
+set_target_properties(pico_dashboard PROPERTIES 
+    OUTPUT_NAME "pico_dashboard_v${FW_VERSION}"
 )
 
 # 6. Enable USB Serial output

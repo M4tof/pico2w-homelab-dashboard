@@ -65,38 +65,64 @@ static bool check_ip_reachable(const char *ip_str, uint16_t port) {
 void send_ntfy_alert(const char *reason) {
     printf("[Watchdog] Sending NTFY Alert: %s\n", reason);
     
-    struct sockaddr_in dest;
     int sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0) return;
-
-    // Resolve ntfy.sh server IP or connect to a public DNS/IP. 
-    // For local reliability, we connect to public ntfy server IP or a local helper. 
-    // Let's target the public ntfy.sh IP (approx) or use standard domain via getaddrinfo:
-    struct addrinfo hints, *res;
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-
-    if (getaddrinfo("ntfy.sh", "80", &hints, &res) == 0) {
-        int conn = connect(sock, res->ai_addr, res->ai_addrlen);
-        if (conn == 0) {
-            char req[512];
-            char msg[256];
-            snprintf(msg, sizeof(msg), "CRITICAL: %s", reason);
-            
-            int req_len = snprintf(req, sizeof(req),
-                "POST /%s HTTP/1.1\r\n"
-                "Host: ntfy.sh\r\n"
-                "Content-Length: %d\r\n"
-                "Content-Type: text/plain\r\n"
-                "Connection: close\r\n\r\n"
-                "%s",
-                NTFY_TOPIC, (int)strlen(msg), msg
-            );
-            write(sock, req, req_len);
-        }
-        freeaddrinfo(res);
+    if (sock < 0) {
+        printf("[Watchdog] Failed to create socket for ntfy\n");
+        return;
     }
+
+    // Set a strict 3-second timeout for connect and send operations 
+    // so it never locks up the thread if the network is dropping out.
+    struct timeval timeout;
+    timeout.tv_sec = 3;
+    timeout.tv_usec = 0;
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout));
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
+
+    struct sockaddr_in dest;
+    memset(&dest, 0, sizeof(dest));
+    dest.sin_family = AF_INET;
+    dest.sin_port = htons(80); // HTTP port for ntfy.sh
+
+    // Use ntfy.sh public IPv4 directly to completely avoid DNS lookup hanging (getaddrinfo)
+    // ntfy.sh resolves to 159.203.148.75
+    if (inet_pton(AF_INET, "159.203.148.75", &dest.sin_addr) <= 0) {
+        printf("[Watchdog] Invalid ntfy IP configuration\n");
+        close(sock);
+        return;
+    }
+
+    // Attempt connection
+    if (connect(sock, (struct sockaddr *)&dest, sizeof(dest)) < 0) {
+        printf("[Watchdog] Connection to ntfy server failed (network offline?)\n");
+        close(sock);
+        return;
+    }
+
+    // Format the payload and HTTP POST request headers
+    char msg[128];
+    snprintf(msg, sizeof(msg), "CRITICAL: %s", reason);
+
+    char req[512];
+    int req_len = snprintf(req, sizeof(req),
+        "POST /%s HTTP/1.1\r\n"
+        "Host: ntfy.sh\r\n"
+        "Content-Length: %d\r\n"
+        "Content-Type: text/plain\r\n"
+        "Connection: close\r\n\r\n"
+        "%s",
+        NTFY_TOPIC, (int)strlen(msg), msg
+    );
+
+    // Send the request
+    int written = write(sock, req, req_len);
+    if (written > 0) {
+        printf("[Watchdog] >>> [ntfy] Alert Sent Successfully!\n");
+    } else {
+        printf("[Watchdog] Failed to write ntfy payload\n");
+    }
+
+    // Always clean up the socket descriptor to prevent resource leaks
     close(sock);
 }
 
@@ -128,7 +154,7 @@ static void network_watchdog_task(void *pvParameters) {
                 currentHealthState = NET_HEALTH_NO_MQTT;
                 printf("[Watchdog] Status: Server (192.168.1.242) is UP, but MQTT stream stalled.\n");
                 if (!alertDispatched) {
-                    send_ntfy_alert("MQTT stream lost, but local server is reachable.");
+                    // send_ntfy_alert("MQTT stream lost, but local server is reachable.");
                     alertDispatched = true;
                 }
             } else {
@@ -141,7 +167,7 @@ static void network_watchdog_task(void *pvParameters) {
                     currentHealthState = NET_HEALTH_SERVER_DOWN;
                     printf("[Watchdog] Status: Router is UP, but target server is DOWN.\n");
                     if (!alertDispatched) {
-                        send_ntfy_alert("Local server 192.168.1.242 is down!");
+                        // send_ntfy_alert("Local server 192.168.1.242 is down!");
                         alertDispatched = true;
                     }
                 } else {

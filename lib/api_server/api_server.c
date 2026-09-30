@@ -19,7 +19,7 @@ extern float readInternalTemperature(void);
 extern uint32_t getFreeHeap(void);
 
 // A sample "writeable" variable to demonstrate handling POST requests from Zabbix/servers
-static int userControlVariable = 0;
+int LIGHT_THRESHOLD = 50;
 
 #define HTTP_PORT 80
 
@@ -62,7 +62,7 @@ static char* handle_get_api(void) {
     cJSON_AddNumberToObject(doc, "free_ram_bytes", (double)getFreeHeap());
     cJSON_AddBoolToObject(doc, "mqtt_connected", is_mqtt_connected());
     cJSON_AddNumberToObject(doc, "led_status", currentLEDState);
-    cJSON_AddNumberToObject(doc, "user_control_var", userControlVariable);
+    cJSON_AddNumberToObject(doc, "Light_Threshold", LIGHT_THRESHOLD);
 
     char *json_string = cJSON_PrintUnformatted(doc);
     cJSON_Delete(doc);
@@ -74,11 +74,11 @@ static void handle_post_api(const char *body) {
     cJSON *doc = cJSON_Parse(body);
     if (!doc) return;
 
-    // Example: Check if the incoming POST has a "set_var" key
-    cJSON *var_item = cJSON_GetObjectItemCaseSensitive(doc, "set_var");
-    if (cJSON_IsNumber(var_item)) {
-        userControlVariable = var_item->valueint;
-        printf("[API Server] Updated userControlVariable via POST to: %d\n", userControlVariable);
+    // Check for the light threshold key from your automation script
+    cJSON *thresh_item = cJSON_GetObjectItemCaseSensitive(doc, "set_light_threshold");
+    if (cJSON_IsNumber(thresh_item)) {
+        LIGHT_THRESHOLD = thresh_item->valueint;
+        printf("[API Server] Updated LIGHT_THRESHOLD via POST to: %d\n", LIGHT_THRESHOLD);
     }
 
     cJSON_Delete(doc);
@@ -129,12 +129,19 @@ static void http_server_task(void *pvParameters) {
             continue; 
         }
 
+        // Set a receive timeout on the client socket so a dead client/server 
+        // doesn't block the thread forever.
+        struct timeval timeout;
+        timeout.tv_sec = 2;
+        timeout.tv_usec = 0;
+        setsockopt(client_sock, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
+
         int len = read(client_sock, rx_buffer, sizeof(rx_buffer) - 1);
         if (len > 0) {
             rx_buffer[len] = '\0';
 
             // Check if request matches /api
-            if (strstr(rx_buffer, "GET /api") != NULL) {
+            if  (strncmp(rx_buffer, "GET /api", 8) == 0) {
                 printf("[API Server] GET /api request received\n");
                 char *json_response = handle_get_api();
                 if (json_response) {
@@ -144,11 +151,10 @@ static void http_server_task(void *pvParameters) {
                     send_http_response(client_sock, 500, "Internal Server Error", "text/plain", "JSON Gen Failed");
                 }
             } 
-            else if (strstr(rx_buffer, "POST /api") != NULL) {
-                // Isolate the HTTP body after double newline (\r\n\r\n)
+            else if (strncmp(rx_buffer, "POST /api", 9) == 0) {
                 char *body = strstr(rx_buffer, "\r\n\r\n");
                 if (body) {
-                    body += 4; // Skip past the \r\n\r\n
+                    body += 4; 
                     handle_post_api(body);
                 }
                 send_http_response(client_sock, 200, "OK", "application/json", "{\"status\":\"success\"}");
@@ -156,7 +162,12 @@ static void http_server_task(void *pvParameters) {
             else {
                 send_http_response(client_sock, 404, "Not Found", "text/plain", "Endpoint Not Found");
             }
+        } 
+        else {
+            // len <= 0 means client closed connection early or timeout occurred
+            // Debug optional: printf("[API Server] Client disconnected or timeout\n");
         }
+
 
         close(client_sock);
     }

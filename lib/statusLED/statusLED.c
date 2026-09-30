@@ -64,17 +64,26 @@ void setRGB(int colorPreset) {
         printf("[StatusLED] Failed to acquire lightMutex, using last known light level\n");
     }
 
-    int maxlevel = 100;
-    int minlevel = 10;
+    if(colorPreset > 3){
+        // if non rgb preset then don't dim [mixes badly, and these are rare anyways, at night it's either a ok or warn.]
+        applyColor(r, g, b);
+        return;
+    }
 
-    if (LightLevelCpy >= 500) {
+    int maxlevel = 100;
+    int minlevel = 20;
+    
+    int maxLight = 500;
+    int minLight = 50;
+
+    if (LightLevelCpy >= maxLight) {
         brightnessPercent = maxlevel;
     } 
-    else if (LightLevelCpy <= 40) {
+    else if (LightLevelCpy <= minLight) {
         brightnessPercent = minlevel;
     } 
     else {
-        brightnessPercent = map(LightLevelCpy, 40, 500, minlevel, maxlevel);
+        brightnessPercent = map(LightLevelCpy, minLight, maxLight, minlevel, maxlevel);
     }
 
     r = (r * brightnessPercent) / 100;

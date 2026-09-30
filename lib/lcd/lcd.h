@@ -3,6 +3,10 @@
 
 #include <stdint.h>
 #include "hardware/i2c.h"
+#include "FreeRTOS.h"
+#include "semphr.h"
+
+extern SemaphoreHandle_t lcdMutex;
 
 // Initialize the LCD (i2c instance, i2c address, rows, cols)
 void lcd_init(i2c_inst_t *i2c_inst, uint8_t i2c_addr, int rows, int cols);

@@ -96,11 +96,29 @@ static void mqtt_thread(void *pvParameters) {
         return;
     }
 
+    uint32_t retry_delay_ms = 5000; // Start with 5 seconds
+
     while (true) {
         if (!mqtt_connected_flag) {
-            mqtt_client_connect(my_mqtt_client, &server_ip, broker_port, mqtt_connection_cb, NULL, &ci);
+            printf("[MQTT] Attempting connection to broker...\n");
+            err_t err = mqtt_client_connect(my_mqtt_client, &server_ip, broker_port, mqtt_connection_cb, NULL, &ci);
+            if (err != ERR_OK) {
+                printf("[MQTT] Connect API error: %d\n", err);
+            }
+        } else {
+            // Reset delay back to baseline once successfully connected
+            retry_delay_ms = 5000;
         }
-        vTaskDelay(pdMS_TO_TICKS(10000));
+
+        // Wait using the backoff delay (caps out at 30 seconds so it doesn't wait forever)
+        vTaskDelay(pdMS_TO_TICKS(retry_delay_ms));
+
+        if (!mqtt_connected_flag) {
+            retry_delay_ms *= 2; // Double the wait time next time (5s -> 10s -> 20s -> 30s)
+            if (retry_delay_ms > 30000) {
+                retry_delay_ms = 30000;
+            }
+        }
     }
 }
 
