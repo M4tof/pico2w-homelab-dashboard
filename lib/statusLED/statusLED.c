@@ -16,7 +16,7 @@ const int ColorPresets[COLOR_PRESET_NUM][3] = {
     {255, 125, 0},     // 4: Yellow [Unknown||Hour]
     {255, 125, 80},    // 5: White [FirstBoot]
     {0, 255, 125},     // 6: Teal [Used as one half of the Router Down state, w/Red]
-    {255, 0, 125},       // 7: Magenta [TBD]
+    {255, 0, 125},       // 7: Magenta Button Press registered
 };
 
 // Function to apply color to the RGB LED Physical pins using hardware PWM

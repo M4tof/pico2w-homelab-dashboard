@@ -7,6 +7,7 @@
 #include "semphr.h"
 
 extern SemaphoreHandle_t lcdMutex;
+extern SemaphoreHandle_t lcdLinesMutex;
 
 // Initialize the LCD (i2c instance, i2c address, rows, cols)
 void lcd_init(i2c_inst_t *i2c_inst, uint8_t i2c_addr, int rows, int cols);
@@ -22,5 +23,8 @@ void lcd_string(const char *s);
 
 // Turn backlight on or off
 void lcd_backlight(bool activate);
+
+// Perform a soft reset of the LCD, reinitializing it without a full power cycle
+void lcd_soft_reset(void);
 
 #endif

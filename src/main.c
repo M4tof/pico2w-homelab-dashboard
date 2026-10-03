@@ -30,6 +30,8 @@ bool hasValidCustomMsg = false; // Tracks if a "c" key was ever successfully rec
 
 bool connectedOnce = false;
 
+bool isButtonOverridingLED = false;
+
 // Handle incoming messages from MQTT
 void handle_incoming_mqtt(const char *topic, const char *payload, uint16_t len) {
     printf("[MQTT] Received message on topic '%s': %s\n", topic, payload);
@@ -170,23 +172,25 @@ void vLightReadingTask(void *pvParameters) {
 void vStatusLEDTask(void *pvParameters) {
     int flash_toggle = 0;
     while (true) {
-        if (currentHealthState == NET_HEALTH_OK) {
-            setRGB(currentLEDState); 
-        } 
-        else if (connectedOnce && currentHealthState == NET_HEALTH_NO_MQTT) {
-            currentLEDState = 3;
-            setRGB(3); 
-        } 
-        else if (connectedOnce && currentHealthState == NET_HEALTH_SERVER_DOWN) {
-            currentLEDState = 2;
-            setRGB(2); 
-        } 
-        else if (currentHealthState == NET_HEALTH_ROUTER_DOWN) {
-            currentLEDState = 6;
-            if (flash_toggle) setRGB(2); 
-            else setRGB(6);             
-            flash_toggle = !flash_toggle;
-        }
+        if (!isButtonOverridingLED) {
+
+            if (currentHealthState == NET_HEALTH_OK) { // Normal operation
+                setRGB(currentLEDState); // what the mqtt says
+            } 
+            else if (connectedOnce && currentHealthState == NET_HEALTH_NO_MQTT) { // MQTT connection lost but server reachable
+                currentLEDState = 3; //warning blue
+                setRGB(3); 
+            } 
+            else if (connectedOnce && currentHealthState == NET_HEALTH_SERVER_DOWN) { // Server unreachable but router reachable
+                currentLEDState = 1; // critical red
+                setRGB(1); 
+            } 
+            else if (currentHealthState == NET_HEALTH_ROUTER_DOWN) { // Router unreachable
+                currentLEDState = 6;
+                if (flash_toggle) setRGB(1);  // flashing red teal to show worst posible scenario
+                else setRGB(6);             
+                flash_toggle = !flash_toggle;
+            }
 
         vTaskDelay(pdMS_TO_TICKS(100)); 
     }
@@ -239,7 +243,7 @@ void vLCDDisplayTask(void *pvParameters) {
             uint32_t totalRAM = 520 * 1024;
             uint32_t freeRAM = getFreeHeap();
             int usedPercent = ((int)(totalRAM - freeRAM) * 100) / (int)totalRAM;
-            
+
             snprintf(currentLcdL2, sizeof(currentLcdL2), "T:%.1fC RAM:%d%%", temp, usedPercent);
         } 
         else {
@@ -263,11 +267,6 @@ void vLCDDisplayTask(void *pvParameters) {
         if (xSemaphoreTake(lcdMutex, portMAX_DELAY) == pdTRUE) {
             writeNum++;
 
-            // if (writeNum % restartEveryWriteNr == 0){
-            //     lcd_init(i2c0, 0x27, 2, 16);
-            //     printf("[LCD] Reset/Re-init LCD sequence executed\n");
-            // }
-
             lcd_clear();
             lcd_set_cursor(0, 0); 
             lcd_string(currentLcdL1);
@@ -278,6 +277,87 @@ void vLCDDisplayTask(void *pvParameters) {
         }
 
         vTaskDelay(pdMS_TO_TICKS(1000)); 
+    }
+}
+
+void vButtonTask(void *pvParameters) {
+    printf("[Button] task started on GPIO %d\n", BUTTON_PIN);
+
+    while (true) {
+        if (gpio_get(BUTTON_PIN) == 0) {
+            vTaskDelay(pdMS_TO_TICKS(50));
+            if (gpio_get(BUTTON_PIN) != 0) continue; 
+
+            printf("[Button] Pressed down...\n");
+            
+            TickType_t pressStartTime = xTaskGetTickCount();
+            uint32_t lastFlashedSecond = 0; // Tracks which second we last flashed on
+
+            // Loop while holding the button
+            while (gpio_get(BUTTON_PIN) == 0) {
+                TickType_t holdDuration = xTaskGetTickCount() - pressStartTime;
+                uint32_t secondsHeld = pdTICKS_TO_MS(holdDuration) / 1000;
+
+                // Check if we crossed into a new second and haven't flashed for it yet
+                if (secondsHeld > 0 && secondsHeld > lastFlashedSecond) {
+                    lastFlashedSecond = secondsHeld;
+                    printf("[Button] Held for %u second(s). Flashing LED...\n", secondsHeld);
+
+                    // Tell vStatusLEDTask to back off while we flash
+                    isButtonOverridingLED = true;
+
+                    // Flash feedback: Turn off (preset 0) briefly, then restore
+                    setRGB(0); // Turn off LED
+
+                    vTaskDelay(pdMS_TO_TICKS(150)); // Short 150ms blink
+                    
+                    setRGB(currentLEDState); // Restore current state
+
+                    // Hand control back to status task
+                    isButtonOverridingLED = false;
+                }
+
+                vTaskDelay(pdMS_TO_TICKS(50)); 
+            }
+
+            // --- RELEASED ROUTER ---
+            TickType_t totalHoldTime = xTaskGetTickCount() - pressStartTime;
+            uint32_t finalSeconds = pdTICKS_TO_MS(totalHoldTime) / 1000;
+
+            printf("[Button] Released after %u seconds held.\n", finalSeconds);
+
+            if (finalSeconds == 0) {
+                printf("[Button] Action: Quick Tap (< 1 second)\n");
+            } 
+            else {
+                switch (finalSeconds) {
+                    case 1:
+                        printf("[Button] Action: 1-Second Hold\n");
+                        break;
+
+                    case 2:
+                        printf("[Button] Action: 2-Second Hold. Soft Reseting LCD...\n");
+
+                        setRGB(7); // flash magenta to indicate reset
+                        lcd_soft_reset();
+
+                        break;
+
+                    case 3:
+                        printf("[Button] Action: 3-Second Hold. Resetting...\n");
+                        setRGB(7); // flash white(boot) to indicate reset
+                        vTaskDelay(pdMS_TO_TICKS(100));
+                        watchdog_reboot(0, 0, 0);
+                        break;
+
+                    default:
+                        printf("[Button] Action: %u-Second Hold, No Special Action", finalSeconds);
+                        break;
+                }
+            }
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
 
@@ -314,12 +394,17 @@ int main() {
     adcMutex = xSemaphoreCreateMutex();
     MQTT_MSG_MUTEX = xSemaphoreCreateMutex();
     lcdMutex = xSemaphoreCreateMutex();
+    lcdLinesMutex = xSemaphoreCreateMutex();
 
     setup_display_pins();
     setup_led_pins();
 
     adc_init(); 
     adc_gpio_init(PHOTO_RES_PIN);
+
+    gpio_init(BUTTON_PIN);
+    gpio_set_dir(BUTTON_PIN, GPIO_IN);
+    gpio_pull_up(BUTTON_PIN);
 
     lcd_init(i2c0, 0x27, 2, 16);
     lcd_set_cursor(0, 0);
@@ -334,6 +419,7 @@ int main() {
     TaskHandle_t mqttSubTaskHandle = NULL;
     TaskHandle_t lightSubTaskHandle = NULL;
     TaskHandle_t watchdogSubTaskHandle = NULL;
+    TaskHandle_t buttonSubTaskHandle = NULL;
 
     // ==========================================
     // CORE 1: REAL-TIME HARDWARE UI (Strictly Pinned)
@@ -342,6 +428,7 @@ int main() {
     xTaskCreate(vTimeDisplayTask, "TimeDisplayTask", 512, NULL, 5, &displayTaskHandle);
     xTaskCreate(vStatusLEDTask, "StatusLEDTask", 256, NULL, 4, &ledTaskHandle);
     xTaskCreate(vLCDDisplayTask, "LCDTask", 2048, NULL, 3, &lcdTaskHandle);
+    xTaskCreate(vButtonTask, "ButtonTask", 256, NULL, 4, &buttonSubTaskHandle);
 
     // ==========================================
     // CORE 0: NETWORK, MQTT & BACKGROUND SERVICES
@@ -357,11 +444,12 @@ int main() {
     start_network_watchdog();
 
 #if configUSE_CORE_AFFINITY && configNUMBER_OF_CORES > 1
-    // Pin Core 1 tasks (Display, LED, LCD)
+    // Pin Core 1 tasks (Display, LED, LCD, button)
     vTaskCoreAffinitySet(displayTaskHandle, 2); 
     vTaskCoreAffinitySet(ledTaskHandle, 2);     
     vTaskCoreAffinitySet(lcdTaskHandle, 2);
-    
+    vTaskCoreAffinitySet(buttonSubTaskHandle, 2);
+
     // Pin Core 0 tasks (MQTT loop, Light polling, Watchdog)
     vTaskCoreAffinitySet(networkTaskHandle,1);
     vTaskCoreAffinitySet(mqttSubTaskHandle, 1);

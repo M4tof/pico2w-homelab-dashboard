@@ -12,6 +12,8 @@
 
 #define PHOTO_RES_PIN 26 // pin for photoresistor readings
 
+#define BUTTON_PIN 22 // pin for the button input
+
 // Proper C constant arrays
 static const uint8_t DIGITS[4] = {16, 19, 20, 11}; 
 static const uint8_t SEGS[7] = {17, 21, 13, 14, 15, 18, 12}; 
