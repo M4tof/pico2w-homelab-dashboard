@@ -3,5 +3,6 @@
 
 void start_api_server(void);
 extern int LIGHT_THRESHOLD;
+extern char currentCustomMsgForDisplay[64];
 
 #endif

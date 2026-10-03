@@ -18,8 +18,11 @@ extern bool is_mqtt_connected(void);
 extern float readInternalTemperature(void);
 extern uint32_t getFreeHeap(void);
 
+
 // A sample "writeable" variable to demonstrate handling POST requests from Zabbix/servers
 int LIGHT_THRESHOLD = 50;
+
+char currentCustomMsgForDisplay[64] = "";
 
 #define HTTP_PORT 80
 
@@ -62,7 +65,8 @@ static char* handle_get_api(void) {
     cJSON_AddNumberToObject(doc, "free_ram_bytes", (double)getFreeHeap());
     cJSON_AddBoolToObject(doc, "mqtt_connected", is_mqtt_connected());
     cJSON_AddNumberToObject(doc, "led_status", currentLEDState);
-    cJSON_AddNumberToObject(doc, "Light_Threshold", LIGHT_THRESHOLD);
+    cJSON_AddNumberToObject(doc, "light_threshold", LIGHT_THRESHOLD);
+    cJSON_AddStringToObject(doc, "custom_msg", currentCustomMsgForDisplay);
 
     char *json_string = cJSON_PrintUnformatted(doc);
     cJSON_Delete(doc);

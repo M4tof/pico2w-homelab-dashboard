@@ -5,7 +5,7 @@
 #include "task.h"
 
 // Define shared variables here (once)
-int displayNumbers[4] = {0, 0, 0, 0}; 
+int displayNumbers[4] = {8, 8, 8, 8}; 
 SemaphoreHandle_t displayMutex = NULL;
 
 int local_hh = 0;

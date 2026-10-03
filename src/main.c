@@ -80,8 +80,10 @@ void handle_incoming_mqtt(const char *topic, const char *payload, uint16_t len) 
             // A valid "c" key was found!
             const char *customMessage = custom_item->valuestring;
             strncpy(currentCustomMsg, customMessage, sizeof(currentCustomMsg) - 1);
+            strncpy(currentCustomMsgForDisplay, customMessage, sizeof(currentCustomMsgForDisplay) - 1);
             currentCustomMsg[sizeof(currentCustomMsg) - 1] = '\0';
-            
+            currentCustomMsgForDisplay[sizeof(currentCustomMsgForDisplay) - 1] = '\0';
+
             lastMQTTMessageTime = xTaskGetTickCount();
             hasValidCustomMsg = true; // Show custom message on LCD
         } else {
@@ -191,6 +193,7 @@ void vStatusLEDTask(void *pvParameters) {
                 else setRGB(6);             
                 flash_toggle = !flash_toggle;
             }
+        }
 
         vTaskDelay(pdMS_TO_TICKS(100)); 
     }
