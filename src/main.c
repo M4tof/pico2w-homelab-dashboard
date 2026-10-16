@@ -235,6 +235,7 @@ void vLCDDisplayTask(void *pvParameters) {
         if (localDiagnostic) {
             int LightCpy = -1;
             int ledCpy = -1;
+            float roomTempCpy = -127.0f;
 
             if (xSemaphoreTake(lightMutex, pdMS_TO_TICKS(5)) == pdTRUE) {
                 LightCpy = currentLightLevel;
@@ -244,15 +245,18 @@ void vLCDDisplayTask(void *pvParameters) {
                 ledCpy = currentLEDState;
                 xSemaphoreGive(ALARM_LED_MUTEX);
             }
+            if (xSemaphoreTake(tempMutex, pdMS_TO_TICKS(5)) == pdTRUE) {
+                roomTempCpy = currentRoomTempShared;
+                xSemaphoreGive(tempMutex);
+            }
 
             snprintf(currentLcdL1, sizeof(currentLcdL1), "Light:%-4d LED:%d", LightCpy, ledCpy);
 
-            float temp = readInternalTemperature();
             uint32_t totalRAM = 520 * 1024;
             uint32_t freeRAM = getFreeHeap();
             int usedPercent = ((int)(totalRAM - freeRAM) * 100) / (int)totalRAM;
 
-            snprintf(currentLcdL2, sizeof(currentLcdL2), "T:%.1fC RAM:%d%%", temp, usedPercent);
+            snprintf(currentLcdL2, sizeof(currentLcdL2), "T:%.1fC RAM:%d%%", roomTempCpy, usedPercent);
         } 
         else {
             char *delimiterPos = strchr(customMsgCopy, MsgDelimiter);

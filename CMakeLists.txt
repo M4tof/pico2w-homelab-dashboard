@@ -10,7 +10,7 @@ include(FreeRTOS_Kernel_import.cmake)
 project(pico_dashboard C CXX ASM)
 
 # Define versioning here
-set(FW_VERSION "2.0.8")
+set(FW_VERSION "2.0.9")
 add_compile_options(-DNO_SYS=0)
 add_definitions(-DFIRMWARE_VERSION="${FW_VERSION}")
 

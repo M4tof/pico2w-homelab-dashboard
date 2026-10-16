@@ -18,6 +18,7 @@ uint32_t getFreeHeap(void) {
     return getTotalHeap() - m.uordblks;
 }
 
+// wrong, stays here for legacy reasons, but it shouldn't be used anymore
 float readInternalTemperature(void) {
     // 1. Ensure temperature sensor is enabled (on RP2350 / RP2040)
     adc_set_temp_sensor_enabled(true);
