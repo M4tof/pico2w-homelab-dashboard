@@ -30,6 +30,7 @@ add_executable(pico_dashboard
     lib/network_watchdog/network_watchdog.c
     lib/display/display_driver.c
     lib/statusLED/statusLED.c
+    lib/temp_sensor/temp_sensor.c
     lib/misc/misc.c
 )
 
@@ -55,6 +56,7 @@ target_include_directories(pico_dashboard PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/lib/statusLED
     ${CMAKE_CURRENT_LIST_DIR}/lib/misc
     ${CMAKE_CURRENT_LIST_DIR}/lib/network_watchdog
+    ${CMAKE_CURRENT_LIST_DIR}/lib/temp_sensor
     ${CMAKE_CURRENT_LIST_DIR}/lib/api_server
     ${CMAKE_CURRENT_LIST_DIR}
     ${FREERTOS_KERNEL_PATH}/include

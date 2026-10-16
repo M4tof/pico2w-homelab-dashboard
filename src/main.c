@@ -13,6 +13,8 @@
 #include "secrets.h"
 #include "cJSON.h"
 #include "lcd.h"
+#include "light_read.h"
+#include "temp_sensor.h"
 #include "mqtt_client.h"
 #include "display_driver.h" 
 #include "light_read.h"
@@ -31,6 +33,9 @@ bool hasValidCustomMsg = false; // Tracks if a "c" key was ever successfully rec
 bool connectedOnce = false;
 
 bool isButtonOverridingLED = false;
+
+SemaphoreHandle_t tempMutex = NULL;
+float currentRoomTempShared = 0.0f;
 
 // Handle incoming messages from MQTT
 void handle_incoming_mqtt(const char *topic, const char *payload, uint16_t len) {
@@ -364,6 +369,34 @@ void vButtonTask(void *pvParameters) {
     }
 }
 
+void vTempReadingTask(void *pvParameters) {
+    temp_sensor_init(TEMP_SENSOR_PIN);
+    printf("[Temp] Sensor task started on GPIO %u\n", TEMP_SENSOR_PIN);
+
+    while (true) {
+        // 1. Tell DS18B20 to convert temperature
+        temp_sensor_start_conversion();
+
+        // 2. Safely yield via FreeRTOS for 750ms conversion time
+        vTaskDelay(pdMS_TO_TICKS(750));
+
+        // 3. Read back scratchpad data
+        float temp = 0.0f;
+        if (temp_sensor_read_scratchpad(&temp)) {
+            if (xSemaphoreTake(tempMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+                currentRoomTempShared = temp;
+                xSemaphoreGive(tempMutex);
+            }
+            printf("[Temp] Room Temperature: %.2f °C\n", temp);
+        } else {
+            printf("[Temp] Error reading DS18B20 sensor!\n");
+        }
+
+        // Wait another 4.25 seconds (Total 5-second polling loop)
+        vTaskDelay(pdMS_TO_TICKS(4250));
+    }
+}
+
 void vCPUWatchdog(void *pvParameters) {
     while (true) {
         watchdog_update(); // Feed the hardware dog every 3 seconds
@@ -398,6 +431,7 @@ int main() {
     MQTT_MSG_MUTEX = xSemaphoreCreateMutex();
     lcdMutex = xSemaphoreCreateMutex();
     lcdLinesMutex = xSemaphoreCreateMutex();
+    tempMutex = xSemaphoreCreateMutex();
 
     setup_display_pins();
     setup_led_pins();
@@ -423,6 +457,7 @@ int main() {
     TaskHandle_t lightSubTaskHandle = NULL;
     TaskHandle_t watchdogSubTaskHandle = NULL;
     TaskHandle_t buttonSubTaskHandle = NULL;
+    TaskHandle_t tempSubTaskHandle = NULL;
 
     // ==========================================
     // CORE 1: REAL-TIME HARDWARE UI (Strictly Pinned)
@@ -439,6 +474,7 @@ int main() {
     xTaskCreate(vNetworkTask, "NetTask", 1024, NULL, 4, &networkTaskHandle);
     xTaskCreate(vUpdateFromMQTTTask, "MQTTSubTask", 1024, NULL, 3, &mqttSubTaskHandle);
     xTaskCreate(vLightReadingTask, "LightReadTask", 256, NULL, 2, &lightSubTaskHandle);
+    xTaskCreate(vTempReadingTask, "TempReadTask", 512, NULL, 2, &tempSubTaskHandle);
     
     // Proper background task for feeding the hardware watchdog
     xTaskCreate(vCPUWatchdog, "CPUWatchdog", 256, NULL, 1, &watchdogSubTaskHandle);
@@ -458,6 +494,7 @@ int main() {
     vTaskCoreAffinitySet(mqttSubTaskHandle, 1);
     vTaskCoreAffinitySet(lightSubTaskHandle, 1);
     vTaskCoreAffinitySet(watchdogSubTaskHandle, 1);
+    vTaskCoreAffinitySet(tempSubTaskHandle, 1);
 #endif
 
     watchdog_enable(8000, true);
