@@ -20,7 +20,7 @@ extern uint32_t getFreeHeap(void);
 extern float currentRoomTempShared;
 
 // A sample "writeable" variable to demonstrate handling POST requests from Zabbix/servers
-int LIGHT_THRESHOLD = 50;
+int LIGHT_THRESHOLD = 500;
 
 char currentCustomMsgForDisplay[64] = "";
 

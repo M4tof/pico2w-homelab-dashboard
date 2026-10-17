@@ -1,4 +1,5 @@
 #include "light_read.h"
+#include "api_server.h"
 #include <stdio.h>
 #include "hardware/adc.h"
 #include "hardware/pwm.h"
@@ -71,10 +72,12 @@ void setRGB(int colorPreset) {
     }
 
     int maxlevel = 100;
-    int minlevel = 20;
+    int minlevel = 5;
+
+    int LightThresholdReference = LIGHT_THRESHOLD; // Default to threshold if mutex fails
     
-    int maxLight = 500;
-    int minLight = 50;
+    int maxLight =  1400; // Max light level for dimming
+    int minLight =  800; // Min light level for dimming
 
     if (LightLevelCpy >= maxLight) {
         brightnessPercent = maxlevel;
@@ -86,9 +89,13 @@ void setRGB(int colorPreset) {
         brightnessPercent = map(LightLevelCpy, minLight, maxLight, minlevel, maxlevel);
     }
 
+    printf("[StatusLED] LightLevel: %d, BrightnessPercent: %d%%\n", LightLevelCpy, brightnessPercent);
+
     r = (r * brightnessPercent) / 100;
     g = (g * brightnessPercent) / 100;
     b = (b * brightnessPercent) / 100;
+
+    printf("[StatusLED] Applying Color - R: %d, G: %d, B: %d\n", r, g, b);
 
     applyColor(r, g, b);
 }

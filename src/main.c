@@ -148,6 +148,7 @@ void vLightReadingTask(void *pvParameters) {
 
     while (true) {
         checkLocalLight();
+        printf("[Light] Current light level: %d\n", currentLightLevel);
         
         if (currentLightLevel < LIGHT_THRESHOLD - 20) { 
             backlightState = false;
@@ -160,6 +161,9 @@ void vLightReadingTask(void *pvParameters) {
         if (xSemaphoreTake(lcdMutex, portMAX_DELAY) == pdTRUE) {
             lcd_backlight(backlightState);
             xSemaphoreGive(lcdMutex);
+        }
+        else {
+            printf("[Light] Failed to acquire lcdMutex for backlight control\n");
         }
 
         if (backlightState != previousBacklightState) {
