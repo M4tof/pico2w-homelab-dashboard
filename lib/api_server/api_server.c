@@ -8,6 +8,7 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "cJSON.h"
+#include "light_values.h"
 
 // External variables declared in your other modules
 extern int local_hh;
@@ -20,7 +21,7 @@ extern uint32_t getFreeHeap(void);
 extern float currentRoomTempShared;
 
 // A sample "writeable" variable to demonstrate handling POST requests from Zabbix/servers
-int LIGHT_THRESHOLD = 500;
+int LIGHT_THRESHOLD = LIGHT_THRESHOLD_VAL;
 
 char currentCustomMsgForDisplay[64] = "";
 

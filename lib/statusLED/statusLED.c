@@ -4,6 +4,7 @@
 #include "hardware/adc.h"
 #include "hardware/pwm.h"
 #include "statusLED.h"
+#include "light_values.h"
 #include "misc.h"
 
 int currentLEDState = 5; // Default to White [FirstBoot]
@@ -63,6 +64,7 @@ void setRGB(int colorPreset) {
     }
     else {
         printf("[StatusLED] Failed to acquire lightMutex, using last known light level\n");
+        LightLevelCpy = currentLightLevel; // Use last known value if mutex fails
     }
 
     if(colorPreset > 3){
@@ -76,8 +78,8 @@ void setRGB(int colorPreset) {
 
     int LightThresholdReference = LIGHT_THRESHOLD; // Default to threshold if mutex fails
     
-    int maxLight =  1400; // Max light level for dimming
-    int minLight =  800; // Min light level for dimming
+    int maxLight =  LIGHT_MAXIMUM_READOUT; // Max light level for dimming
+    int minLight =  LIGHT_MINIMUM_READOUT; // Min light level for dimming
 
     if (LightLevelCpy >= maxLight) {
         brightnessPercent = maxlevel;
@@ -89,13 +91,11 @@ void setRGB(int colorPreset) {
         brightnessPercent = map(LightLevelCpy, minLight, maxLight, minlevel, maxlevel);
     }
 
-    printf("[StatusLED] LightLevel: %d, BrightnessPercent: %d%%\n", LightLevelCpy, brightnessPercent);
+    // printf("[StatusLED] LightLevel: %d, BrightnessPercent: %d%%\n", LightLevelCpy, brightnessPercent);
 
     r = (r * brightnessPercent) / 100;
     g = (g * brightnessPercent) / 100;
     b = (b * brightnessPercent) / 100;
-
-    printf("[StatusLED] Applying Color - R: %d, G: %d, B: %d\n", r, g, b);
 
     applyColor(r, g, b);
 }

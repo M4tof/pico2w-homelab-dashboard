@@ -6,6 +6,7 @@
 #include "hardware/pwm.h"
 #include "pinout.h"
 #include "misc.h"
+#include "light_values.h"
 
 #define COLOR_PRESET_NUM 8
 
