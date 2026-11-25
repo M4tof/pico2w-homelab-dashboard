@@ -74,7 +74,7 @@ void setRGB(int colorPreset) {
     }
 
     int maxlevel = 100;
-    int minlevel = 5;
+    int minlevel = 20;
 
     int LightThresholdReference = LIGHT_THRESHOLD; // Default to threshold if mutex fails
     
