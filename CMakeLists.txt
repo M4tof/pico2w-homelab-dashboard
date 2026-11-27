@@ -10,7 +10,7 @@ include(FreeRTOS_Kernel_import.cmake)
 project(pico_dashboard C CXX ASM)
 
 # Define versioning here
-set(FW_VERSION "2.0.9")
+set(FW_VERSION "2.0.10")
 add_compile_options(-DNO_SYS=0)
 add_definitions(-DFIRMWARE_VERSION="${FW_VERSION}")
 
@@ -21,6 +21,7 @@ pico_sdk_init()
 # List all your .c files here. 
 # If you add 'mqtt.c' or 'sensors.c', add them to this list.
 add_executable(pico_dashboard 
+    certs.S
     src/main.c
     lib/api_server/api_server.c
     lib/lcd/lcd.c
@@ -70,6 +71,7 @@ target_link_libraries(pico_dashboard PRIVATE
     pico_stdlib 
     pico_cyw43_arch_lwip_sys_freertos
     pico_lwip_mqtt
+    pico_mbedtls
     FreeRTOS-Kernel
     FreeRTOS-Kernel-Heap4
     hardware_i2c

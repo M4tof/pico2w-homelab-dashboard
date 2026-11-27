@@ -479,7 +479,7 @@ int main() {
     // ==========================================
     // CORE 0: NETWORK, MQTT & BACKGROUND SERVICES
     // ==========================================
-    xTaskCreate(vNetworkTask, "NetTask", 1024, NULL, 4, &networkTaskHandle);
+    xTaskCreate(vNetworkTask, "NetTask", 8192, NULL, 4, &networkTaskHandle);
     xTaskCreate(vUpdateFromMQTTTask, "MQTTSubTask", 1024, NULL, 3, &mqttSubTaskHandle);
     xTaskCreate(vLightReadingTask, "LightReadTask", 256, NULL, 2, &lightSubTaskHandle);
     xTaskCreate(vTempReadingTask, "TempReadTask", 512, NULL, 2, &tempSubTaskHandle);
