@@ -34,6 +34,7 @@ add_executable(pico_dashboard
     lib/temp_sensor/temp_sensor.c
     lib/misc/misc.c
     lib/config_manager/config_manager.c
+    lib/firmware_integrity/firmware_integrity.c
 )
 
 # Automatically rename the output file to include your firmware version
@@ -61,6 +62,7 @@ target_include_directories(pico_dashboard PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/lib/temp_sensor
     ${CMAKE_CURRENT_LIST_DIR}/lib/api_server
     ${CMAKE_CURRENT_LIST_DIR}/lib/config_manager
+    ${CMAKE_CURRENT_LIST_DIR}/lib/firmware_integrity
     ${CMAKE_CURRENT_LIST_DIR}
     ${FREERTOS_KERNEL_PATH}/include
     ${FREERTOS_KERNEL_PATH}/portable/ThirdParty/Community-Supported-Ports/GCC/RP2350_ARM_NTZ/non_secure
@@ -81,5 +83,14 @@ target_link_libraries(pico_dashboard PRIVATE
     hardware_pwm
 )
 
-# 9. Generate .uf2 file (DO NOT MODIFY)
+# 9. Generate .bin and .uf2 files
 pico_add_extra_outputs(pico_dashboard)
+
+# 10. Stamp BIN and UF2 AFTER pico_add_extra_outputs finishes
+add_custom_target(stamp_firmware ALL
+    COMMAND python3 ${CMAKE_CURRENT_LIST_DIR}/tools/stamp_firmware.py 
+            ${CMAKE_CURRENT_BINARY_DIR}/pico_dashboard_v${FW_VERSION}.bin
+            ${CMAKE_CURRENT_BINARY_DIR}/pico_dashboard_v${FW_VERSION}.uf2
+    DEPENDS pico_dashboard
+    COMMENT "Stamping BIN and UF2 with cryptographic integrity digest"
+)

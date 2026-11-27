@@ -18,6 +18,7 @@
 #include "mqtt_client.h"
 #include "display_driver.h" 
 #include "statusLED.h"
+#include "firmware_integrity.h"
 #include "api_server.h"
 #include "network_watchdog.h"
 #include "misc.h"
@@ -383,7 +384,7 @@ void vButtonTask(void *pvParameters) {
                         if (displayTaskHandle)    vTaskSuspend(displayTaskHandle);
 
                         setRGB(6); // Teal LED for config mode
-                        
+
                         if (xSemaphoreTake(lcdMutex, portMAX_DELAY) == pdTRUE) {
                             lcd_clear();
                             lcd_set_cursor(0, 0);
@@ -455,6 +456,19 @@ void vApplicationMallocFailedHook(void) {
 int main() {
     stdio_init_all();
     sleep_ms(2000);
+
+    // --- STEP 0: SOFTWARE SECURE BOOT INTEGRITY CHECK ---
+    if (!verify_firmware_integrity()) {
+        printf("[LOCKDOWN] Refusing to boot tampered firmware.\n");
+        
+        // Fast flashing Red LED to indicate security lockout
+        while (1) {
+            setRGB(1); // Red
+            sleep_ms(100);
+            setRGB(0); // Off
+            sleep_ms(100);
+        }
+    }
 
     // --- STEP 1: LOAD PERSISTENT CONFIGURATION ---
     // Reads from the last flash sector, or falls back to secrets.h
