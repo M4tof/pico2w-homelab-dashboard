@@ -18,6 +18,15 @@
 #define TCPIP_THREAD_STACKSIZE 1024
 #define DEFAULT_THREAD_STACKSIZE 1024
 
+// --- SAFETY BUFFERS FOR CONCURRENT SOCKETS ---
+// Increase active TCP connection slots so HTTP + MQTT + Watchdog 
+// don't collide and exhaust the pool when the server drops connection.
+#define MEMP_NUM_TCP_PCB        12   // Default is often too low (~5-8)
+#define MEMP_NUM_TCP_PCB_LISTEN  6   // For your HTTP server listening socket
+#define MEMP_NUM_TCP_SEG        32   // Ensure enough segments for payloads
+#define MEMP_NUM_NETBUF          16
+#define MEMP_NUM_NETCONN         16
+
 // REQUIRED FOR MQTT: Increase timeout pool by 1
 #define MEMP_NUM_SYS_TIMEOUT (LWIP_NUM_SYS_TIMEOUT_INTERNAL + 1)
 

@@ -16,3 +16,8 @@ bin/
 # Credentials (Crucial!)
 src/secrets.h
 secrets.h
+*.pem
+*.key
+private_key.pem
+
+forme_README.md

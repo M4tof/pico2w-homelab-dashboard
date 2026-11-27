@@ -1,7 +1,10 @@
 #include <stdio.h>
 #include "pico/stdlib.h"
 #include "hardware/i2c.h"
+#include "FreeRTOS.h"
+#include "task.h"
 #include "lcd.h"
+
 
 // Commands
 #define LCD_CLEARDISPLAY 0x01
@@ -33,14 +36,23 @@ static int _rows;
 static int _cols;
 static uint8_t backlight_val = LCD_BACKLIGHT;
 
+SemaphoreHandle_t lcdMutex = NULL;
+SemaphoreHandle_t lcdLinesMutex = NULL;
+
 static void i2c_write_byte(uint8_t val) {
     i2c_write_blocking(lcd_i2c, _addr, &val, 1, false);
 }
 
 static void lcd_toggle_enable(uint8_t val) {
+
+    taskENTER_CRITICAL();
+
     i2c_write_byte(val | LCD_ENABLE_BIT | backlight_val);
     sleep_us(1);
     i2c_write_byte((val & ~LCD_ENABLE_BIT) | backlight_val);
+
+    taskEXIT_CRITICAL();
+
     sleep_us(50);
 }
 
@@ -48,9 +60,16 @@ static void lcd_send_byte(uint8_t val, int mode) {
     uint8_t high = mode | (val & 0xF0) | backlight_val;
     uint8_t low = mode | ((val << 4) & 0xF0) | backlight_val;
 
+    taskENTER_CRITICAL();
     i2c_write_byte(high);
+    taskEXIT_CRITICAL();
+
     lcd_toggle_enable(high);
+    
+    taskENTER_CRITICAL();
     i2c_write_byte(low);
+    taskEXIT_CRITICAL();
+    
     lcd_toggle_enable(low);
 }
 
@@ -72,7 +91,23 @@ void lcd_string(const char *s) {
 
 void lcd_backlight(bool activate) {
     backlight_val = activate ? LCD_BACKLIGHT : 0x00;
+
+    taskENTER_CRITICAL();
     i2c_write_byte(backlight_val);
+    taskEXIT_CRITICAL();
+}
+
+void lcd_soft_reset(void) {
+    if (xSemaphoreTake(lcdMutex, portMAX_DELAY) == pdTRUE) {
+        // Send a sequence of function set commands to force the 4-bit / 8-bit state machine to reset
+        lcd_send_byte(0x03, LCD_COMMAND);
+        sleep_ms(5);
+        lcd_send_byte(0x02, LCD_COMMAND); // Return to 4-bit mode
+        lcd_send_byte(0x28, LCD_COMMAND); // Function set: 2 line, 5x8 dots
+        lcd_send_byte(0x0C, LCD_COMMAND); // Display ON, Cursor OFF
+        lcd_clear();
+        xSemaphoreGive(lcdMutex);
+    }
 }
 
 void lcd_init(i2c_inst_t *i2c_inst, uint8_t i2c_addr, int rows, int cols) {
