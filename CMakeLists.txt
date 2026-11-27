@@ -33,6 +33,7 @@ add_executable(pico_dashboard
     lib/statusLED/statusLED.c
     lib/temp_sensor/temp_sensor.c
     lib/misc/misc.c
+    lib/config_manager/config_manager.c
 )
 
 # Automatically rename the output file to include your firmware version
@@ -59,6 +60,7 @@ target_include_directories(pico_dashboard PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/lib/network_watchdog
     ${CMAKE_CURRENT_LIST_DIR}/lib/temp_sensor
     ${CMAKE_CURRENT_LIST_DIR}/lib/api_server
+    ${CMAKE_CURRENT_LIST_DIR}/lib/config_manager
     ${CMAKE_CURRENT_LIST_DIR}
     ${FREERTOS_KERNEL_PATH}/include
     ${FREERTOS_KERNEL_PATH}/portable/ThirdParty/Community-Supported-Ports/GCC/RP2350_ARM_NTZ/non_secure

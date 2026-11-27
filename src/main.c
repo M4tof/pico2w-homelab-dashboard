@@ -17,11 +17,11 @@
 #include "temp_sensor.h"
 #include "mqtt_client.h"
 #include "display_driver.h" 
-#include "light_read.h"
 #include "statusLED.h"
 #include "api_server.h"
 #include "network_watchdog.h"
 #include "misc.h"
+#include "config_manager.h" // Dynamic flash configuration
 
 SemaphoreHandle_t adcMutex;
 
@@ -36,6 +36,16 @@ bool isButtonOverridingLED = false;
 
 SemaphoreHandle_t tempMutex = NULL;
 float currentRoomTempShared = 0.0f;
+
+TaskHandle_t displayTaskHandle = NULL;
+TaskHandle_t ledTaskHandle = NULL;
+TaskHandle_t networkTaskHandle = NULL;
+TaskHandle_t lcdTaskHandle = NULL;
+TaskHandle_t mqttSubTaskHandle = NULL;
+TaskHandle_t lightSubTaskHandle = NULL;
+TaskHandle_t watchdogSubTaskHandle = NULL;
+TaskHandle_t buttonSubTaskHandle = NULL;
+TaskHandle_t tempSubTaskHandle = NULL;
 
 // Handle incoming messages from MQTT
 void handle_incoming_mqtt(const char *topic, const char *payload, uint16_t len) {
@@ -71,7 +81,6 @@ void handle_incoming_mqtt(const char *topic, const char *payload, uint16_t len) 
             currentLEDState = newLEDState;
             if (newLEDState == 1) {
                 printf("[LED] CRITICAL STATE\n");
-                
             } else {
                 printf("[LED] Setting LED to preset %d\n", newLEDState);
             }
@@ -82,7 +91,6 @@ void handle_incoming_mqtt(const char *topic, const char *payload, uint16_t len) 
     if (xSemaphoreTake(MQTT_MSG_MUTEX, pdMS_TO_TICKS(100)) == pdTRUE) {
         cJSON *custom_item = cJSON_GetObjectItemCaseSensitive(doc, "c");
         if (cJSON_IsString(custom_item) && (custom_item->valuestring != NULL)) {
-            // A valid "c" key was found!
             const char *customMessage = custom_item->valuestring;
             strncpy(currentCustomMsg, customMessage, sizeof(currentCustomMsg) - 1);
             strncpy(currentCustomMsgForDisplay, customMessage, sizeof(currentCustomMsgForDisplay) - 1);
@@ -90,9 +98,8 @@ void handle_incoming_mqtt(const char *topic, const char *payload, uint16_t len) 
             currentCustomMsgForDisplay[sizeof(currentCustomMsgForDisplay) - 1] = '\0';
 
             lastMQTTMessageTime = xTaskGetTickCount();
-            hasValidCustomMsg = true; // Show custom message on LCD
+            hasValidCustomMsg = true;
         } else {
-            // No "c" key provided in this packet -> fallback to local diagnostics
             hasValidCustomMsg = false; 
         }
         xSemaphoreGive(MQTT_MSG_MUTEX);
@@ -120,15 +127,25 @@ void vNetworkTask(void *pvParameters) {
     cyw43_arch_enable_sta_mode();
 
     while (true) {
-        if (cyw43_arch_wifi_connect_timeout_ms(WIFI_SSID, WIFI_PASSWORD, CYW43_AUTH_WPA2_AES_PSK, 15000) == 0) {
+        printf("[NetTask] Connecting to Wi-Fi SSID: %s...\n", g_active_config.wifi_ssid);
+
+        // Connect using dynamic configuration (Flash or secrets.h)
+        if (cyw43_arch_wifi_connect_timeout_ms(g_active_config.wifi_ssid, 
+                                               g_active_config.wifi_pass, 
+                                               CYW43_AUTH_WPA2_AES_PSK, 15000) == 0) {
             printf("[NetTask] Connected to Wi-Fi successfully!\n");
             if (!connectedOnce){
                 connectedOnce = true;
             }
-            start_mqtt_client(MQTT_BROKER_IP, 1883, handle_incoming_mqtt);
+            
+            // Connect MQTT using dynamic IP and Port
+            printf("[NetTask] Starting MQTT Client targeting: %s:%d\n", 
+                   g_active_config.mqtt_ip, g_active_config.mqtt_port);
+            start_mqtt_client(g_active_config.mqtt_ip, g_active_config.mqtt_port, handle_incoming_mqtt);
 
             char *ip_str = ip4addr_ntoa(netif_ip4_addr(netif_list));
             printf("[NetTask] Assigned IP Address: %s\n", ip_str ? ip_str : "0.0.0.0");
+            
             start_api_server();
             break;
         }
@@ -148,16 +165,15 @@ void vLightReadingTask(void *pvParameters) {
 
     while (true) {
         checkLocalLight();
-        printf("[Light] Current light level: %d\n", currentLightLevel);
         
-        if (currentLightLevel < LIGHT_THRESHOLD - 20) { 
+        int threshold = get_light_threshold();
+        if (currentLightLevel < threshold - 20) { 
             backlightState = false;
         }
-        else if (currentLightLevel > LIGHT_THRESHOLD + 40){ 
+        else if (currentLightLevel > threshold + 40){ 
             backlightState = true;
         }
 
-        // Atomically control the LCD backlight safely via mutex
         if (xSemaphoreTake(lcdMutex, portMAX_DELAY) == pdTRUE) {
             lcd_backlight(backlightState);
             xSemaphoreGive(lcdMutex);
@@ -184,21 +200,20 @@ void vStatusLEDTask(void *pvParameters) {
     int flash_toggle = 0;
     while (true) {
         if (!isButtonOverridingLED) {
-
-            if (currentHealthState == NET_HEALTH_OK) { // Normal operation
-                setRGB(currentLEDState); // what the mqtt says
+            if (currentHealthState == NET_HEALTH_OK) { 
+                setRGB(currentLEDState); 
             } 
-            else if (connectedOnce && currentHealthState == NET_HEALTH_NO_MQTT) { // MQTT connection lost but server reachable
-                currentLEDState = 3; //warning blue
+            else if (connectedOnce && currentHealthState == NET_HEALTH_NO_MQTT) { 
+                currentLEDState = 3; // warning blue
                 setRGB(3); 
             } 
-            else if (connectedOnce && currentHealthState == NET_HEALTH_SERVER_DOWN) { // Server unreachable but router reachable
+            else if (connectedOnce && currentHealthState == NET_HEALTH_SERVER_DOWN) { 
                 currentLEDState = 1; // critical red
                 setRGB(1); 
             } 
-            else if (currentHealthState == NET_HEALTH_ROUTER_DOWN) { // Router unreachable
+            else if (currentHealthState == NET_HEALTH_ROUTER_DOWN) { 
                 currentLEDState = 6;
-                if (flash_toggle) setRGB(1);  // flashing red teal to show worst posible scenario
+                if (flash_toggle) setRGB(1);  
                 else setRGB(6);             
                 flash_toggle = !flash_toggle;
             }
@@ -212,8 +227,6 @@ void vLCDDisplayTask(void *pvParameters) {
     char currentLcdL1[17] = "Dis Bash's Bootin";
     char currentLcdL2[17] = "Please Wait...";
     const char MsgDelimiter = '|'; 
-    
-    const int restartEveryWriteNr = 10;
     int writeNum = 0;
 
     while (true) {
@@ -279,7 +292,6 @@ void vLCDDisplayTask(void *pvParameters) {
             }
         }
         
-        // --- ABSOLUTELY ATOMIC LCD WRITE & RESET SECTION ---
         if (xSemaphoreTake(lcdMutex, portMAX_DELAY) == pdTRUE) {
             writeNum++;
 
@@ -307,36 +319,28 @@ void vButtonTask(void *pvParameters) {
             printf("[Button] Pressed down...\n");
             
             TickType_t pressStartTime = xTaskGetTickCount();
-            uint32_t lastFlashedSecond = 0; // Tracks which second we last flashed on
+            uint32_t lastFlashedSecond = 0;
 
-            // Loop while holding the button
             while (gpio_get(BUTTON_PIN) == 0) {
                 TickType_t holdDuration = xTaskGetTickCount() - pressStartTime;
                 uint32_t secondsHeld = pdTICKS_TO_MS(holdDuration) / 1000;
 
-                // Check if we crossed into a new second and haven't flashed for it yet
                 if (secondsHeld > 0 && secondsHeld > lastFlashedSecond) {
                     lastFlashedSecond = secondsHeld;
                     printf("[Button] Held for %u second(s). Flashing LED...\n", secondsHeld);
 
-                    // Tell vStatusLEDTask to back off while we flash
                     isButtonOverridingLED = true;
+                    setRGB(0); 
 
-                    // Flash feedback: Turn off (preset 0) briefly, then restore
-                    setRGB(0); // Turn off LED
+                    vTaskDelay(pdMS_TO_TICKS(150)); 
+                    setRGB(currentLEDState); 
 
-                    vTaskDelay(pdMS_TO_TICKS(150)); // Short 150ms blink
-                    
-                    setRGB(currentLEDState); // Restore current state
-
-                    // Hand control back to status task
                     isButtonOverridingLED = false;
                 }
 
                 vTaskDelay(pdMS_TO_TICKS(50)); 
             }
 
-            // --- RELEASED ROUTER ---
             TickType_t totalHoldTime = xTaskGetTickCount() - pressStartTime;
             uint32_t finalSeconds = pdTICKS_TO_MS(totalHoldTime) / 1000;
 
@@ -352,22 +356,52 @@ void vButtonTask(void *pvParameters) {
                         break;
 
                     case 2:
-                        printf("[Button] Action: 2-Second Hold. Soft Reseting LCD...\n");
-
-                        setRGB(7); // flash magenta to indicate reset
+                        printf("[Button] Action: 2-Second Hold. Soft Resetting LCD...\n");
+                        setRGB(7); 
                         lcd_soft_reset();
-
                         break;
 
                     case 3:
-                        printf("[Button] Action: 3-Second Hold. Resetting...\n");
-                        setRGB(7); // flash white(boot) to indicate reset
+                        printf("[Button] Action: 3-Second Hold. Rebooting...\n");
+                        setRGB(7); 
                         vTaskDelay(pdMS_TO_TICKS(100));
                         watchdog_reboot(0, 0, 0);
                         break;
 
+                    case 4:
+                        printf("[Button] Action: 4-Second Hold! ENTERING CONFIG MODE...\n");
+                        g_config_mode_active = true;
+
+                        // 1. FREEZE ALL BACKGROUND TASKS
+                        // This stops ALL background printf, sensor reads, and MQTT traffic immediately
+                        if (tempSubTaskHandle)    vTaskSuspend(tempSubTaskHandle);
+                        if (lightSubTaskHandle)   vTaskSuspend(lightSubTaskHandle);
+                        if (mqttSubTaskHandle)    vTaskSuspend(mqttSubTaskHandle);
+                        if (networkTaskHandle)    vTaskSuspend(networkTaskHandle);
+                        if (lcdTaskHandle)        vTaskSuspend(lcdTaskHandle);     // Stops LCD from getting overwritten!
+                        if (ledTaskHandle)        vTaskSuspend(ledTaskHandle);     // Stops LED from getting overwritten!
+                        if (displayTaskHandle)    vTaskSuspend(displayTaskHandle);
+
+                        setRGB(6); // Teal LED for config mode
+                        
+                        if (xSemaphoreTake(lcdMutex, portMAX_DELAY) == pdTRUE) {
+                            lcd_clear();
+                            lcd_set_cursor(0, 0);
+                            lcd_string("CONFIG MODE");
+                            lcd_set_cursor(1, 0);
+                            lcd_string("Connect USB Ser");
+                            xSemaphoreGive(lcdMutex);
+                        }
+
+                        // Feed watchdog before blocking on serial console
+                        watchdog_update();
+
+                        // Enters interactive serial console, saves to flash, and reboots
+                        run_serial_config_console();
+                        break;
+
                     default:
-                        printf("[Button] Action: %u-Second Hold, No Special Action", finalSeconds);
+                        printf("[Button] Action: %u-Second Hold, No Special Action\n", finalSeconds);
                         break;
                 }
             }
@@ -382,13 +416,9 @@ void vTempReadingTask(void *pvParameters) {
     printf("[Temp] Sensor task started on GPIO %u\n", TEMP_SENSOR_PIN);
 
     while (true) {
-        // 1. Tell DS18B20 to convert temperature
         temp_sensor_start_conversion();
-
-        // 2. Safely yield via FreeRTOS for 750ms conversion time
         vTaskDelay(pdMS_TO_TICKS(750));
 
-        // 3. Read back scratchpad data
         float temp = 0.0f;
         if (temp_sensor_read_scratchpad(&temp)) {
             if (xSemaphoreTake(tempMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
@@ -400,24 +430,19 @@ void vTempReadingTask(void *pvParameters) {
             printf("[Temp] Error reading DS18B20 sensor!\n");
         }
 
-        // Wait another 4.25 seconds (Total 5-second polling loop)
         vTaskDelay(pdMS_TO_TICKS(4250));
     }
 }
 
 void vCPUWatchdog(void *pvParameters) {
     while (true) {
-        watchdog_update(); // Feed the hardware dog every 3 seconds
-        // printf("[CPUWatchdog] Fed hardware dog\n"); // Keep commented unless debugging
+        watchdog_update(); 
         vTaskDelay(pdMS_TO_TICKS(3000)); 
     }
 }
 
 void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName) {
     printf("[CRITICAL] Stack overflow detected in task: %s\n", pcTaskName);
-    
-    // Flash all LEDs red rapidly or force an immediate hardware reset
-    // (Hardware watchdog will catch it if we force a spin, or we can reboot manually)
     watchdog_reboot(0, 0, 0); 
     while(1);
 }
@@ -430,6 +455,10 @@ void vApplicationMallocFailedHook(void) {
 int main() {
     stdio_init_all();
     sleep_ms(2000);
+
+    // --- STEP 1: LOAD PERSISTENT CONFIGURATION ---
+    // Reads from the last flash sector, or falls back to secrets.h
+    load_device_config();
 
     printf("[Main] Initializing hardware pins...\n");
     displayMutex = xSemaphoreCreateMutex();
@@ -457,48 +486,28 @@ int main() {
 
     printf("[Main] Initializing software components...\n");
 
-    TaskHandle_t displayTaskHandle = NULL;
-    TaskHandle_t ledTaskHandle = NULL;
-    TaskHandle_t networkTaskHandle = NULL;
-    TaskHandle_t lcdTaskHandle = NULL;
-    TaskHandle_t mqttSubTaskHandle = NULL;
-    TaskHandle_t lightSubTaskHandle = NULL;
-    TaskHandle_t watchdogSubTaskHandle = NULL;
-    TaskHandle_t buttonSubTaskHandle = NULL;
-    TaskHandle_t tempSubTaskHandle = NULL;
-
-    // ==========================================
-    // CORE 1: REAL-TIME HARDWARE UI (Strictly Pinned)
-    // ==========================================
-    // These run continuously with high priority to ensure zero screen flicker.
+    // CORE 1: REAL-TIME HARDWARE UI
     xTaskCreate(vTimeDisplayTask, "TimeDisplayTask", 512, NULL, 5, &displayTaskHandle);
     xTaskCreate(vStatusLEDTask, "StatusLEDTask", 256, NULL, 4, &ledTaskHandle);
     xTaskCreate(vLCDDisplayTask, "LCDTask", 2048, NULL, 3, &lcdTaskHandle);
     xTaskCreate(vButtonTask, "ButtonTask", 256, NULL, 4, &buttonSubTaskHandle);
 
-    // ==========================================
     // CORE 0: NETWORK, MQTT & BACKGROUND SERVICES
-    // ==========================================
     xTaskCreate(vNetworkTask, "NetTask", 8192, NULL, 4, &networkTaskHandle);
     xTaskCreate(vUpdateFromMQTTTask, "MQTTSubTask", 1024, NULL, 3, &mqttSubTaskHandle);
     xTaskCreate(vLightReadingTask, "LightReadTask", 256, NULL, 2, &lightSubTaskHandle);
     xTaskCreate(vTempReadingTask, "TempReadTask", 512, NULL, 2, &tempSubTaskHandle);
-    
-    // Proper background task for feeding the hardware watchdog
     xTaskCreate(vCPUWatchdog, "CPUWatchdog", 256, NULL, 1, &watchdogSubTaskHandle);
 
-    // Start your network health monitor task
     start_network_watchdog();
 
 #if configUSE_CORE_AFFINITY && configNUMBER_OF_CORES > 1
-    // Pin Core 1 tasks (Display, LED, LCD, button)
     vTaskCoreAffinitySet(displayTaskHandle, 2); 
     vTaskCoreAffinitySet(ledTaskHandle, 2);     
     vTaskCoreAffinitySet(lcdTaskHandle, 2);
     vTaskCoreAffinitySet(buttonSubTaskHandle, 2);
 
-    // Pin Core 0 tasks (MQTT loop, Light polling, Watchdog)
-    vTaskCoreAffinitySet(networkTaskHandle,1);
+    vTaskCoreAffinitySet(networkTaskHandle, 1);
     vTaskCoreAffinitySet(mqttSubTaskHandle, 1);
     vTaskCoreAffinitySet(lightSubTaskHandle, 1);
     vTaskCoreAffinitySet(watchdogSubTaskHandle, 1);
