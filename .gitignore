@@ -19,5 +19,6 @@ secrets.h
 *.pem
 *.key
 private_key.pem
+server.crt
 
 forme_README.md

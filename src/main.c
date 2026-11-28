@@ -456,6 +456,7 @@ void vApplicationMallocFailedHook(void) {
 int main() {
     stdio_init_all();
     sleep_ms(2000);
+    setup_led_pins(); // the only setup that can be done before the integrity check, so we can flash the LED if the firmware is tampered with, these are only output pins and cannot be used to compromise the system
 
     // --- STEP 0: SOFTWARE SECURE BOOT INTEGRITY CHECK ---
     if (!verify_firmware_integrity()) {
@@ -485,7 +486,6 @@ int main() {
     tempMutex = xSemaphoreCreateMutex();
 
     setup_display_pins();
-    setup_led_pins();
 
     adc_init(); 
     adc_gpio_init(PHOTO_RES_PIN);
